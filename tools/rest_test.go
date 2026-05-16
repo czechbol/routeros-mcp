@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -52,6 +53,128 @@ func TestPaginate(t *testing.T) {
 	if len(outNeg.Items) != 2 {
 		t.Fatalf("negative offset should clamp to 0: %#v", outNeg)
 	}
+}
+
+func TestAddHandlerHTTP(t *testing.T) {
+	var method, path string
+	var body []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		body = readAll(t, r)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"ret":"*9"}`))
+	}))
+	defer ts.Close()
+	c := server.NewClient(server.Config{BaseURL: ts.URL, Username: "u", Password: "p"})
+	_, out, err := addHandler(c)(context.Background(), nil, AddIn{
+		Path: "ip/address",
+		Body: map[string]any{"address": "10.0.0.1/24"},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if method != "PUT" {
+		t.Errorf("method: %q", method)
+	}
+	if path != "/rest/ip/address" {
+		t.Errorf("path: %q", path)
+	}
+	if !strings.Contains(string(body), `"address":"10.0.0.1/24"`) {
+		t.Errorf("body: %q", body)
+	}
+	if out.Status != http.StatusCreated {
+		t.Errorf("status: %d", out.Status)
+	}
+}
+
+func TestSetHandlerHTTPEscapesID(t *testing.T) {
+	var path string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+	c := server.NewClient(server.Config{BaseURL: ts.URL, Username: "u", Password: "p"})
+	_, _, err := setHandler(c)(context.Background(), nil, SetIn{
+		Path: "ip/address",
+		ID:   "*A",
+		Body: map[string]any{"disabled": "no"},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if path != "/rest/ip/address/*A" {
+		t.Errorf("path: %q", path)
+	}
+}
+
+func TestSetHandlerRejectsBadID(t *testing.T) {
+	c := server.NewClient(server.Config{BaseURL: "http://invalid", Username: "u", Password: "p"})
+	res, _, err := setHandler(c)(context.Background(), nil, SetIn{
+		Path: "ip/address",
+		ID:   "*A?injected=1",
+		Body: map[string]any{"x": "y"},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatal("expected ToolError for injected ID")
+	}
+}
+
+func TestRemoveHandlerHTTP(t *testing.T) {
+	var method, path string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+	c := server.NewClient(server.Config{BaseURL: ts.URL, Username: "u", Password: "p"})
+	_, out, err := removeHandler(c)(context.Background(), nil, RemoveIn{
+		Path: "ip/address",
+		ID:   "*A",
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if method != "DELETE" || path != "/rest/ip/address/*A" {
+		t.Errorf("method=%q path=%q", method, path)
+	}
+	if out.Status != http.StatusNoContent {
+		t.Errorf("status: %d", out.Status)
+	}
+}
+
+func TestPrintHandlerForwardsProplist(t *testing.T) {
+	var rawQuery string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer ts.Close()
+	c := server.NewClient(server.Config{BaseURL: ts.URL, Username: "u", Password: "p"})
+	_, _, err := printHandler(c)(context.Background(), nil, PrintIn{
+		Path:   "ip/address",
+		Fields: []string{"address", "interface"},
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !strings.Contains(rawQuery, ".proplist=address%2Cinterface") {
+		t.Errorf("expected .proplist in query: %q", rawQuery)
+	}
+}
+
+func readAll(t *testing.T, r *http.Request) []byte {
+	t.Helper()
+	b, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	return b
 }
 
 func TestExecHandlerCallsUpstream(t *testing.T) {

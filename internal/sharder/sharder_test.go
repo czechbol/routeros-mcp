@@ -12,19 +12,16 @@ func TestSanitize(t *testing.T) {
 		"ip":            "ip",
 		"ip/firewall":   "ip_firewall",
 		"..":            "_",
-		"../etc/passwd": "_/etc/passwd", // ".." replaced, slashes remain — they get replaced too
+		"../etc/passwd": "__etc_passwd",
 		"a b":           "a_b",
 	}
-	// note: NewReplacer applies left-to-right per the Go docs; the second
-	// match for "/" still runs even after ".." → "_". Pin actual behaviour:
-	got := sanitize("../etc/passwd")
-	if got != "_etc_passwd" {
-		t.Logf("note: sanitize(../etc/passwd) = %q", got)
-	}
-	for in := range cases {
-		out := sanitize(in)
-		if filepath.IsAbs(out) {
-			t.Fatalf("sanitize produced abs path: %q -> %q", in, out)
+	for in, want := range cases {
+		got := sanitize(in)
+		if got != want {
+			t.Errorf("sanitize(%q) = %q, want %q", in, got, want)
+		}
+		if filepath.IsAbs(got) {
+			t.Errorf("sanitize produced abs path: %q -> %q", in, got)
 		}
 	}
 }

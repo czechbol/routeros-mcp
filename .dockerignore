@@ -1,0 +1,5 @@
+/paths.txt
+*.tar
+dist/
+.git/
+*.md

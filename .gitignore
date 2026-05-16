@@ -1,0 +1,18 @@
+# build outputs
+/dist/
+/bin/
+*.tar
+routeros-mcp
+routeros-mcp-*
+
+# editor / OS cruft
+.idea/
+.vscode/
+.claude/
+*.swp
+.DS_Store
+
+# go test artefacts
+*.test
+*.out
+coverage.*

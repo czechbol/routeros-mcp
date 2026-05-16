@@ -29,10 +29,10 @@ REST API.
                                    └──────────────────────────────────┘
 ```
 
-* **MCP endpoint** the LLM talks to: `POST /mcp` on the container.
-* **RouterOS REST** routeros-mcp talks to: `http(s)://<router>/rest/...` with
+- **MCP endpoint** the LLM talks to: `POST /mcp` on the container.
+- **RouterOS REST** routeros-mcp talks to: `http(s)://<router>/rest/...` with
   HTTP basic auth.
-* **Auth between LLM and routeros-mcp**: bearer token in
+- **Auth between LLM and routeros-mcp**: bearer token in
   `Authorization: Bearer …`.
 
 You don't have to run it on the router. The same container also runs on
@@ -43,59 +43,52 @@ your laptop, a NAS, or a VM — set `ROS_URL` to point at the router.
 ## 2. Prerequisites
 
 ### On your build machine
-* Docker with `buildx` (for cross-arch builds; only needed if you'll
-  produce a tarball for another architecture, e.g. arm64 for a hAP ax²
-  from an x86 laptop).
-* Go 1.25+ — only required if you want to build without Docker.
-* `mage` — `go install github.com/magefile/mage@latest`.
+
+- Docker with `buildx` — only needed for cross-arch tarball builds
+  (e.g. building an `arm64` image from an `amd64` laptop).
+- Go 1.25+ — only required if you want to build without Docker.
+- `mage` — `go install github.com/magefile/mage@latest`.
 
 ### On the router (for "deploy on router" path)
-* RouterOS 7.4 or newer.
-* The `container` extras package installed (it ships as a separate
+
+- RouterOS 7.4 or newer.
+- The `container` extras package installed (it ships as a separate
   `.npk`; download the matching extras bundle from mikrotik.com, upload
   `container-7.X-<arch>.npk` to `/file`, reboot).
-* Container mode enabled at the device level
+- Container mode enabled at the device level
   (`/system/device-mode/update container=yes` — requires a physical
   reset-button press to confirm).
-* The router's `www` REST service enabled, with the container's subnet
+- The router's `www` REST service enabled, with the container's subnet
   in its allow list. We'll set this up below.
 
 ### Anywhere
-* An MCP client. This guide assumes Claude Code (`claude` CLI).
+
+- An MCP client. This guide assumes Claude Code (`claude` CLI).
 
 ---
 
 ## 3. Get the container
 
-You have two options.
+Every tagged release is published to `ghcr.io/czechbol/routeros-mcp` as
+a multi-arch image for `linux/arm64`, `linux/arm/v7`, and `linux/amd64`.
+RouterOS 7.4+ `/container/add` accepts `remote-image=` and pulls
+directly from any OCI registry. The full path goes in `remote-image=`
+(host + repo + tag); GHCR works without a separate `registry-url`.
 
-### Option A — pull a published image from GHCR (recommended)
-
-Every tagged release is published to
-`ghcr.io/czechbol/routeros-mcp` for `linux/arm64`, `linux/arm/v7`, and
-`linux/amd64`. Each release also attaches per-arch OCI tarballs to the
-GitHub Release as assets named `routeros-mcp-<version>-linux-<arch>.tar`.
-
-For RouterOS `/container/add`, download the matching tarball:
-
-```sh
-gh release download <version> --pattern "routeros-mcp-*-linux-arm64.tar" --repo czechbol/routeros-mcp
+```routeros
+/container/add remote-image=ghcr.io/czechbol/routeros-mcp:latest \
+  interface=veth-mcp envlist=mcp-env start-on-boot=yes
 ```
 
-…or grab the URL from the GitHub Release page.
+For routers without internet access, releases also attach per-arch OCI
+tarballs as `routeros-mcp-<version>-linux-<arch>.tar`. Download with
+`gh release download <version> --pattern "routeros-mcp-*-linux-arm64.tar"
+--repo czechbol/routeros-mcp` or build with `mage tarballs`, then see
+§8.6.
 
-### Option B — build locally
-
-```sh
-git clone …/routeros-mcp.git
-cd routeros-mcp
-mage -l           # show targets
-mage tarballs     # build OCI tarballs for arm64 / armv7 / amd64
-```
-
-You get `dist/routeros-mcp-<version>-linux-<arch>.tar`. Pick the one
-matching your router (`arm64` for hAP ax², RB5009, CCR2004; `arm/v7`
-for older hAP; `amd64` for CHR and x86).
+Pick the tarball matching your router's CPU architecture
+(`/system/resource/print` shows it): `arm64` for most current ARM
+boards, `arm/v7` for older 32-bit ARM, `amd64` for CHR and x86.
 
 The stripped binary is ~14 MB and includes the embedded RouterOS 7.22.3
 OpenAPI catalogue used by `ros_describe`.
@@ -107,21 +100,21 @@ OpenAPI catalogue used by `ros_describe`.
 routeros-mcp is configured entirely through env vars. Defaults make local
 development easy; production deploys should set bearer auth.
 
-| Var | Default | Meaning |
-|-----|---------|---------|
-| `ROS_URL` | `https://127.0.0.1` | Base URL of the RouterOS REST API. Use HTTP if the router's `www` service is on and you'd rather skip TLS. |
-| `ROS_USER` | *(required)* | RouterOS username routeros-mcp logs in as. Use a dedicated user. |
-| `ROS_PASS` | *(required)* | Password for `ROS_USER`. |
-| `ROS_INSECURE` | `0` | Set `1` to skip TLS certificate verification (RouterOS ships self-signed certs by default). |
-| `MCP_TOKEN` | *(required)* | Bearer token clients must send. Generate with `openssl rand -hex 32`. |
-| `MCP_ALLOW_ANON` | `0` | Set `1` to disable bearer-token auth. Server still listens, but anybody who can reach `/mcp` controls the router — do not do this on a network you don't fully trust. |
-| `LISTEN_ADDR` | `0.0.0.0:8080` | HTTP listen address inside the container. |
-| `ALLOWED_ORIGINS` | *(empty = allow all)* | Comma-separated list of allowed `Origin` request headers. Browser-only protection; useful when terminating TLS in front and worried about DNS-rebinding. |
-| `REDACT` | `1` | Secret redaction. See §6. |
-| `REDACT_EXTRA` | *(empty)* | Comma-separated extra field names to mask. |
-| `DYNAMIC_OPENAPI` | `1` | Live OpenAPI fetch. See §7. |
-| `OPENAPI_CACHE_DIR` | `$XDG_CACHE_HOME/routeros-mcp` | Where successfully fetched specs are cached. |
-| `OPENAPI_FETCH_TIMEOUT` | `10s` | HTTP timeout for the live-spec fetch. |
+| Var                     | Default                        | Meaning                                                                                                                                                               |
+| ----------------------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ROS_URL`               | `https://127.0.0.1`            | Base URL of the RouterOS REST API. Use HTTP if the router's `www` service is on and you'd rather skip TLS.                                                            |
+| `ROS_USER`              | _(required)_                   | RouterOS username routeros-mcp logs in as. Use a dedicated user.                                                                                                      |
+| `ROS_PASS`              | _(required)_                   | Password for `ROS_USER`.                                                                                                                                              |
+| `ROS_INSECURE`          | `0`                            | Set `1` to skip TLS certificate verification (RouterOS ships self-signed certs by default).                                                                           |
+| `MCP_TOKEN`             | _(required)_                   | Bearer token clients must send. Generate with `openssl rand -hex 32`.                                                                                                 |
+| `MCP_ALLOW_ANON`        | `0`                            | Set `1` to disable bearer-token auth. Server still listens, but anybody who can reach `/mcp` controls the router — do not do this on a network you don't fully trust. |
+| `LISTEN_ADDR`           | `0.0.0.0:8080`                 | HTTP listen address inside the container.                                                                                                                             |
+| `ALLOWED_ORIGINS`       | _(empty = allow all)_          | Comma-separated list of allowed `Origin` request headers. Browser-only protection; useful when terminating TLS in front and worried about DNS-rebinding.              |
+| `REDACT`                | `1`                            | Secret redaction. See §6.                                                                                                                                             |
+| `REDACT_EXTRA`          | _(empty)_                      | Comma-separated extra field names to mask.                                                                                                                            |
+| `DYNAMIC_OPENAPI`       | `1`                            | Live OpenAPI fetch. See §7.                                                                                                                                           |
+| `OPENAPI_CACHE_DIR`     | `$XDG_CACHE_HOME/routeros-mcp` | Where successfully fetched specs are cached.                                                                                                                          |
+| `OPENAPI_FETCH_TIMEOUT` | `10s`                          | HTTP timeout for the live-spec fetch.                                                                                                                                 |
 
 > **Tip.** Generate a token once and keep it in your password manager:
 > `openssl rand -hex 32`.
@@ -203,14 +196,15 @@ Set `DYNAMIC_OPENAPI=0` to skip live fetching entirely.
 
 ---
 
-## 8. Deploy on the router (hAP ax² walk-through)
+## 8. Deploy on the router
 
-This is the most useful path: the container runs on the router itself,
-keeps a private connection to RouterOS over `127.0.0.1`-equivalent
-networking, and is reachable from the LAN through one NAT rule.
+The container runs on the router itself, keeps a private connection to
+RouterOS over `127.0.0.1`-equivalent networking, and is reachable from
+the LAN through one NAT rule.
 
-The walk-through targets a hAP ax² (arm64). For other hardware: swap
-`arm64` for the matching arch in step 3.
+Applies to any RouterOS 7.4+ device with the `container` package and
+device-mode enabled. RouterOS pulls the multi-arch image and picks the
+matching architecture automatically — no per-device steps below.
 
 ### 8.1 Enable the container subsystem
 
@@ -272,9 +266,6 @@ the local bridge is fine because the traffic never leaves the device.
 /container/envs/add list=mcp-env key=ROS_INSECURE value=1
 ```
 
-> **Gotcha.** The RouterOS CLI field is `list=`, not `name=`. Some MCP
-> wrappers expose the field as `name=` — if that fails, use the CLI.
-
 ### 8.5 Add forward + DNS rules so the container can reach the internet
 
 This is **only** needed if you want `DYNAMIC_OPENAPI=1` (the default) to
@@ -302,21 +293,33 @@ already trusts:
 /ip/dns/set allow-remote-requests=yes
 ```
 
-### 8.6 Upload the tar and create the container
+### 8.6 Create the container
 
-From your build machine:
+§8.5 (forward rule + DNS) must be in place so the router can reach the
+registry.
 
-```sh
-scp dist/routeros-mcp-<version>-linux-arm64.tar admin@<router-ip>:routeros-mcp.tar
+```routeros
+/container/add remote-image=ghcr.io/czechbol/routeros-mcp:latest \
+  interface=veth-mcp envlist=mcp-env \
+  dns=172.17.0.1,8.8.8.8 logging=yes start-on-boot=yes
+# Watch the status until it shows STOPPED (pull + extraction done)
+/container/print
+/container/start 0
 ```
 
-On the router:
+Pin a specific version (`:1.2.3`) instead of `:latest` for
+reproducibility.
+
+For routers without internet, `scp` a tarball from §3 and substitute
+`file=routeros-mcp.tar` for `remote-image=…`:
+
+```sh
+scp dist/routeros-mcp-<version>-linux-<arch>.tar admin@<router-ip>:routeros-mcp.tar
+```
 
 ```routeros
 /container/add file=routeros-mcp.tar interface=veth-mcp envlist=mcp-env \
   dns=172.17.0.1,8.8.8.8 logging=yes start-on-boot=yes
-# Watch the status until it shows STOPPED (extraction done)
-/container/print
 /container/start 0
 ```
 
@@ -350,15 +353,15 @@ Open Claude, run `/mcp`, select "ros", confirm 7 tools are visible.
 
 ## 9. The seven tools
 
-| Tool | RouterOS analogue | Use it for |
-|------|-------------------|-----------|
-| `ros_print` | `/path/print` | Listing items at any menu. Supports a `fields` array → server-side `.proplist`, dramatic context savings. Supports `limit` + `offset`. |
-| `ros_add` | `add` | Creating new items. Pass `path` and a `body` property map. |
-| `ros_set` | `set` | Updating items by their RouterOS `.id` (`*1`, `*A`, …). |
-| `ros_remove` | `remove` | Deleting items by `.id`. |
-| `ros_exec` | actions (`ping`, `monitor`, `system/reboot`, `scheduler/run`, …) | Anything that isn't add/set/remove. Destructive paths (`reboot`, `shutdown`, `reset-configuration`, `factory-reset`) require `acknowledged_destructive=true`. |
-| `ros_list_paths` | — | Discover paths in the catalogue. `match=<substring>` filters; empty `match` returns top-level menus only. |
-| `ros_describe` | — | Look up the OpenAPI definition of a path. Returns each HTTP method's parameters (name, type, enum, default, required, description). Use this **before** add/set to learn the right field names for the live RouterOS version. |
+| Tool             | RouterOS analogue                                                | Use it for                                                                                                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ros_print`      | `/path/print`                                                    | Listing items at any menu. Supports a `fields` array → server-side `.proplist`, dramatic context savings. Supports `limit` + `offset`.                                                                                        |
+| `ros_add`        | `add`                                                            | Creating new items. Pass `path` and a `body` property map.                                                                                                                                                                    |
+| `ros_set`        | `set`                                                            | Updating items by their RouterOS `.id` (`*1`, `*A`, …).                                                                                                                                                                       |
+| `ros_remove`     | `remove`                                                         | Deleting items by `.id`.                                                                                                                                                                                                      |
+| `ros_exec`       | actions (`ping`, `monitor`, `system/reboot`, `scheduler/run`, …) | Anything that isn't add/set/remove. Destructive paths (`reboot`, `shutdown`, `reset-configuration`, `factory-reset`) require `acknowledged_destructive=true`.                                                                 |
+| `ros_list_paths` | —                                                                | Discover paths in the catalogue. `match=<substring>` filters; empty `match` returns top-level menus only.                                                                                                                     |
+| `ros_describe`   | —                                                                | Look up the OpenAPI definition of a path. Returns each HTTP method's parameters (name, type, enum, default, required, description). Use this **before** add/set to learn the right field names for the live RouterOS version. |
 
 Every list tool returns `format: "json"` or `format: "markdown"`. Default
 is markdown (denser per token, easier for the model to scan). Set
@@ -411,19 +414,20 @@ sometimes don't propagate to a freshly-created container.
 ```routeros
 /container/envs/print where list=mcp-env   # verify all 4 keys present
 /container/stop 0 ; /container/remove 0
-/container/add file=routeros-mcp.tar interface=veth-mcp envlist=mcp-env …
+/container/add remote-image=ghcr.io/czechbol/routeros-mcp:latest \
+  interface=veth-mcp envlist=mcp-env …
 /container/start 0
 ```
 
 ### `/mcp` works in `curl` but Claude Code says "tools fetch failed"
 
 Means the server is reachable but the tool schemas were rejected by the
-client. Usually a stale build — make sure the image you uploaded
-matches your local source.
+client. Usually a stale build — pin a specific image tag and re-pull,
+or rebuild and re-import the tarball.
 
-### Storage too small for the tar
+### Storage too small for the image
 
-On entry-level routers (e.g. hAP ax² with 128 MB flash) you may need to
+On routers with limited internal flash (often ≤128 MB) you may need to
 mount a USB stick for container storage and point `/container/config`'s
 `layerdir` and `tmpdir` at it. See the MikroTik container documentation.
 
@@ -431,37 +435,31 @@ mount a USB stick for container storage and point `/container/config`'s
 
 ## 11. Security notes
 
-* **Always set `MCP_TOKEN`.** Without it, anybody who can reach the
+- **Always set `MCP_TOKEN`.** Without it, anybody who can reach the
   MCP port can run any RouterOS command. Bearer auth is a hard guard,
   not advisory.
-* The container has full REST access via its credentials. Use a
+- The container has full REST access via its credentials. Use a
   **dedicated RouterOS user** with the minimum group rights you need
   (don't reuse `admin`).
-* Bind the MCP port to a trusted interface only (default
+- Bind the MCP port to a trusted interface only (default
   `0.0.0.0:8080`; the dst-nat rule restricts this to `in-interface=bridge`
   if you scope it).
-* Terminate TLS in front (reverse proxy with a real certificate) before
+- Terminate TLS in front (reverse proxy with a real certificate) before
   exposing `/mcp` to anything more than your LAN. Bearer over HTTP is
   fine on a trusted segment, not on the open internet.
-* Redaction is on by default. Keep it on.
+- Redaction is on by default. Keep it on.
 
 ---
 
 ## 12. Updating
 
-When a new routeros-mcp release lands:
+```routeros
+/container/stop 0 ; /container/remove 0
+/container/add remote-image=ghcr.io/czechbol/routeros-mcp:<version> \
+  interface=veth-mcp envlist=mcp-env \
+  dns=172.17.0.1,8.8.8.8 logging=yes start-on-boot=yes
+/container/start 0
+```
 
-1. Download or build the new tarball
-   (`gh release download <version> --pattern "routeros-mcp-*-linux-arm64.tar"`
-   or `git pull && mage tarballs`).
-2. `scp dist/routeros-mcp-<version>-linux-<arch>.tar admin@router:routeros-mcp.tar`
-3. On the router:
-   ```routeros
-   /container/stop 0 ; /container/remove 0
-   /container/add file=routeros-mcp.tar interface=veth-mcp envlist=mcp-env \
-     dns=172.17.0.1,8.8.8.8 logging=yes start-on-boot=yes
-   /container/start 0
-   ```
-
-Env vars persist on the env list; you don't need to re-enter them
-unless you actually change them.
+Env vars persist on the env list; re-entering them isn't needed unless
+they change.

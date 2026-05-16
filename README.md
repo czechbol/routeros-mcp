@@ -18,26 +18,18 @@ on the router itself via the RouterOS `container` feature.
 
 ## Quick start
 
-Pull a published image:
+### Off the router
+
+Pull the image and point it at the router's REST API:
 
 ```sh
 docker pull ghcr.io/czechbol/routeros-mcp:latest
-```
 
-…or build tarballs locally:
-
-```sh
-go install github.com/magefile/mage@latest
-git clone …/routeros-mcp && cd routeros-mcp
-mage tarballs   # -> dist/routeros-mcp-<version>-linux-<arch>.tar
-```
-
-Run locally:
-
-```sh
 MCP_TOKEN=$(openssl rand -hex 32) \
 ROS_URL=https://10.0.0.1 ROS_USER=routeros-mcp ROS_PASS=… ROS_INSECURE=1 \
-  ./dist/routeros-mcp
+  docker run --rm -p 8080:8080 \
+    -e MCP_TOKEN -e ROS_URL -e ROS_USER -e ROS_PASS -e ROS_INSECURE \
+    ghcr.io/czechbol/routeros-mcp:latest
 ```
 
 Wire up Claude Code:
@@ -47,8 +39,14 @@ claude mcp add --transport http ros http://localhost:8080/mcp \
   --header "Authorization: Bearer $MCP_TOKEN"
 ```
 
-For the full walk-through (including deploying on the router itself,
-firewall rules, DNS, troubleshooting): see [docs/user-guide.md](docs/user-guide.md).
+### On the router
+
+Deploying inside RouterOS' `container` feature involves multiple
+prerequisites — enabling container mode, creating a bridge + veth,
+populating an env list, allowing the container subnet on the REST
+service, and adding NAT/firewall rules to expose the MCP port.
+
+Walk-through: [docs/user-guide.md §8](docs/user-guide.md#8-deploy-on-the-router).
 
 ## Contributing
 

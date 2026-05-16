@@ -41,12 +41,15 @@ func TestLookupOperations_LiveHit(t *testing.T) {
 	})
 	t.Cleanup(func() { SetLiveSpec(nil) })
 
-	ops, version, err := lookupOperations("/ip/address")
+	ops, version, source, err := lookupOperations("/ip/address")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if version != "7.99.0" {
 		t.Fatalf("version: got %q", version)
+	}
+	if source != "cache" {
+		t.Fatalf("source: got %q, want %q", source, "cache")
 	}
 	op, ok := ops["get"]
 	if !ok {
@@ -70,12 +73,15 @@ func TestLookupOperations_LiveMissFallsThroughToEmbedded(t *testing.T) {
 
 	// /system/resource is in the embedded shards. Live spec lacks it, so the
 	// lookup must fall through and still succeed against the embedded data.
-	ops, version, err := lookupOperations("/system/resource")
+	ops, version, source, err := lookupOperations("/system/resource")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
 	if version == "" {
 		t.Fatalf("expected embedded version, got empty")
+	}
+	if source != sourceEmbedded {
+		t.Fatalf("source: got %q, want %q", source, sourceEmbedded)
 	}
 	if len(ops) == 0 {
 		t.Fatalf("expected embedded ops, got empty")
@@ -84,9 +90,12 @@ func TestLookupOperations_LiveMissFallsThroughToEmbedded(t *testing.T) {
 
 func TestLookupOperations_NoLiveSpec(t *testing.T) {
 	SetLiveSpec(nil)
-	ops, _, err := lookupOperations("/system/resource")
+	ops, _, source, err := lookupOperations("/system/resource")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
+	}
+	if source != sourceEmbedded {
+		t.Fatalf("source: got %q, want %q", source, sourceEmbedded)
 	}
 	if len(ops) == 0 {
 		t.Fatalf("expected embedded ops")
@@ -104,7 +113,7 @@ func TestLookupOperations_LiveLookupErrorPropagates(t *testing.T) {
 	})
 	t.Cleanup(func() { SetLiveSpec(nil) })
 
-	_, _, err := lookupOperations("/ip/address")
+	_, _, _, err := lookupOperations("/ip/address")
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}

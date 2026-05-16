@@ -85,39 +85,41 @@ func loadEmbeddedIndex() (openapiIndex, error) {
 	return embeddedIndex, errEmbeddedIndex
 }
 
-func lookupOperations(normalised string) (map[string]operationDoc, string, error) {
+const sourceEmbedded = "embedded"
+
+func lookupOperations(normalised string) (map[string]operationDoc, string, string, error) {
 	if live := activeLiveSpec(); live != nil {
 		if _, ok := live.PathKeys[normalised]; ok {
 			raw, err := live.LookupPath(normalised)
 			if err != nil {
-				return nil, live.SpecVersion, fmt.Errorf("live spec lookup %q: %w", normalised, err)
+				return nil, live.SpecVersion, live.Source, fmt.Errorf("live spec lookup %q: %w", normalised, err)
 			}
 			ops, err := decodeLiveOps(raw)
 			if err != nil {
-				return nil, live.SpecVersion, err
+				return nil, live.SpecVersion, live.Source, err
 			}
-			return ops, live.SpecVersion, nil
+			return ops, live.SpecVersion, live.Source, nil
 		}
 		// Live spec didn't have the path — fall through to embedded (a path
 		// may exist in 7.22.3 but not in an older live version, or vice versa).
 	}
 	idx, err := loadEmbeddedIndex()
 	if err != nil {
-		return nil, "", fmt.Errorf("load openapi index: %w", err)
+		return nil, "", sourceEmbedded, fmt.Errorf("load openapi index: %w", err)
 	}
 	menu := strings.SplitN(strings.TrimLeft(normalised, pathSep), pathSep, 2)[0]
 	shard, err := loadShard(menu)
 	if err != nil {
-		return nil, idx.SpecVersion, fmt.Errorf("no description for path %q: %w", normalised, err)
+		return nil, idx.SpecVersion, sourceEmbedded, fmt.Errorf("no description for path %q: %w", normalised, err)
 	}
 	ops, ok := shard.Paths[normalised]
 	if !ok {
-		return nil, idx.SpecVersion, fmt.Errorf(
+		return nil, idx.SpecVersion, sourceEmbedded, fmt.Errorf(
 			"%w: %q (version %s); try ros_list_paths",
 			server.ErrPathNotInCatalogue, normalised, idx.SpecVersion,
 		)
 	}
-	return ops, idx.SpecVersion, nil
+	return ops, idx.SpecVersion, sourceEmbedded, nil
 }
 
 func decodeLiveOps(raw json.RawMessage) (map[string]operationDoc, error) {
@@ -180,6 +182,7 @@ type DescribedOperation struct {
 type DescribeOut struct {
 	Path        string               `json:"path"`
 	SpecVersion string               `json:"spec_version"`
+	Source      string               `json:"source"` // "live" | "live-mismatched" | "embedded"
 	Operations  []DescribedOperation `json:"operations"`
 }
 
@@ -207,12 +210,12 @@ func describe(
 	}
 
 	normalised := pathSep + strings.TrimLeft(in.Path, pathSep)
-	ops, specVersion, err := lookupOperations(normalised)
+	ops, specVersion, source, err := lookupOperations(normalised)
 	if err != nil {
 		return server.ToolError("%v", err), DescribeOut{}, nil
 	}
 
-	out := DescribeOut{Path: normalised, SpecVersion: specVersion}
+	out := DescribeOut{Path: normalised, SpecVersion: specVersion, Source: source}
 	wantOp := strings.ToLower(strings.TrimSpace(in.Op))
 	methods := make([]string, 0, len(ops))
 	for m := range ops {
@@ -326,7 +329,7 @@ func mergeSchema(schema map[string]any, props map[string]any, required map[strin
 
 func renderDescribe(out DescribeOut) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# %s (RouterOS %s)\n\n", out.Path, out.SpecVersion)
+	fmt.Fprintf(&b, "# %s (RouterOS %s, source: %s)\n\n", out.Path, out.SpecVersion, out.Source)
 	for _, op := range out.Operations {
 		fmt.Fprintf(&b, "## %s\n", op.Method)
 		if op.Summary != "" {

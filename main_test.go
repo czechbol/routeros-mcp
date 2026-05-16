@@ -62,7 +62,7 @@ func TestOriginGuard(t *testing.T) {
 		{"empty allowlist: passthrough", nil, "https://x", http.StatusOK},
 		{"matched: 200", []string{"https://x"}, "https://x", http.StatusOK},
 		{"mismatched: 403", []string{"https://x"}, "https://y", http.StatusForbidden},
-		{"no Origin header: passthrough", []string{"https://x"}, "", http.StatusOK},
+		{"no Origin header with allowlist: 403", []string{"https://x"}, "", http.StatusForbidden},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

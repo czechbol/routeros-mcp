@@ -154,6 +154,11 @@ func authGuard(next http.Handler, token string, allowAnon bool) http.Handler {
 	})
 }
 
+// originGuard, when configured with a non-empty allowlist, requires every
+// request to carry an Origin header that matches an entry. An empty or
+// missing Origin is rejected with 403 — RouterOS MCP is not designed for
+// CSRF-style ambient credentials, but accepting unsourced requests would
+// let any process on a reachable network reach /mcp once it knows a token.
 func originGuard(next http.Handler, allowed []string) http.Handler {
 	if len(allowed) == 0 {
 		return next
@@ -164,11 +169,9 @@ func originGuard(next http.Handler, allowed []string) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" {
-			if _, ok := set[origin]; !ok {
-				http.Error(w, "forbidden origin", http.StatusForbidden)
-				return
-			}
+		if _, ok := set[origin]; !ok {
+			http.Error(w, "forbidden origin", http.StatusForbidden)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})

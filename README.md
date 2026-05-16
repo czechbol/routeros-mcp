@@ -68,3 +68,8 @@ patterns, gotchas: see [docs/contributing.md](docs/contributing.md).
   `REDACT_EXTRA`.
 - Use a dedicated RouterOS user; don't reuse `admin`.
 - Terminate TLS in front for any non-LAN exposure.
+- `ALLOWED_ORIGINS` (comma-separated) restricts the `/mcp` handler to
+  requests with a matching `Origin` header. When set, requests without an
+  `Origin` are rejected — non-browser clients (curl, native MCP clients
+  that don't emit `Origin`) must either be left unconstrained by leaving
+  `ALLOWED_ORIGINS` empty or be gated at the network layer instead.

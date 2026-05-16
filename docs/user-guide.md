@@ -6,7 +6,7 @@
 
 `routeros-mcp` is a small server that lets an LLM (Claude, etc.) drive a MikroTik
 router through the **Model Context Protocol** (MCP). It exposes the entire
-RouterOS REST API as **seven generic tools** so the model can list, add,
+RouterOS REST API as **generic tools** so the model can list, add,
 modify, remove, execute and discover RouterOS endpoints at runtime.
 
 The server runs as an ~14 MB container. It is designed to run on the
@@ -351,7 +351,7 @@ Open Claude, run `/mcp`, select "ros", confirm 7 tools are visible.
 
 ---
 
-## 9. The seven tools
+## 9. Available tools
 
 | Tool             | RouterOS analogue                                                | Use it for                                                                                                                                                                                                                    |
 | ---------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

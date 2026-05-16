@@ -66,6 +66,37 @@ func TestRedact_Disabled(t *testing.T) {
 	}
 }
 
+func TestRedactString_Patterns(t *testing.T) {
+	t.Setenv("REDACT", "")
+	resetRedactor()
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{`password=hunter2`, `password=` + redactionMask},
+		{`PASSWORD = hunter2`, `PASSWORD = ` + redactionMask},
+		{`{"password":"hunter2"}`, `{"password":"` + redactionMask + `"}`},
+		{`"psk": "abc"`, `"psk": "` + redactionMask + `"`},
+		{`name=foo password=bar other=z`, `name=foo password=` + redactionMask + ` other=z`},
+		{`no secrets here`, `no secrets here`},
+	}
+	for _, tc := range cases {
+		got := RedactString(tc.in)
+		if got != tc.want {
+			t.Errorf("RedactString(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestRedactString_Disabled(t *testing.T) {
+	t.Setenv("REDACT", "0")
+	resetRedactor()
+	got := RedactString("password=hunter2")
+	if got != "password=hunter2" {
+		t.Fatalf("REDACT=0: got %q", got)
+	}
+}
+
 func TestRedact_Extra(t *testing.T) {
 	t.Setenv("REDACT", "")
 	t.Setenv("REDACT_EXTRA", "comment, custom-field ")

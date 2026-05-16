@@ -42,6 +42,49 @@ func TestDoRedactsErrorBody(t *testing.T) {
 	}
 }
 
+func TestDoScrubsPlaintextErrorBody(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("login failed for password=hunter2 user=foo"))
+	}))
+	_, _, err := c.Do(context.Background(), "GET", "ip/address", nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("password leaked in plaintext error: %v", err)
+	}
+	if !strings.Contains(err.Error(), redactionMask) {
+		t.Fatalf("expected [REDACTED] marker in error: %v", err)
+	}
+}
+
+func TestDoSurfacesParseErrorOnMalformedSuccess(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"password":"hunter2"`)) // unterminated
+	}))
+	raw, status, err := c.Do(context.Background(), "GET", "ip/address", nil, nil)
+	if err != nil {
+		t.Fatalf("expected no Go error on 2xx: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("status: got %d", status)
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		t.Fatalf("raw: expected synthetic map, got %T", raw)
+	}
+	if _, ok := m["_parse_error"]; !ok {
+		t.Fatalf("expected _parse_error key: %#v", m)
+	}
+	rawField, _ := m["_raw"].(string)
+	if strings.Contains(rawField, "hunter2") {
+		t.Fatalf("_raw leaked password: %v", rawField)
+	}
+}
+
 func TestDoBodyTruncation(t *testing.T) {
 	body := strings.Repeat("x", 1024)
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

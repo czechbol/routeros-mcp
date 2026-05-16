@@ -116,12 +116,19 @@ func (c *Client) Do(
 		log.Printf("upstream %s /rest/%s: JSON parse failed: %v", method, restPath, parseErr)
 	}
 	if resp.StatusCode >= httpErrorBoundary {
+		safeBody := truncate(RedactString(string(raw)), errBodyTruncate)
 		return Redact(parsed), resp.StatusCode, fmt.Errorf(
-			"%w: status %d: %s", ErrUpstream, resp.StatusCode, truncate(string(raw), errBodyTruncate),
+			"%w: status %d: %s", ErrUpstream, resp.StatusCode, safeBody,
 		)
 	}
 	if len(raw) == 0 {
 		return nil, resp.StatusCode, nil
+	}
+	if parseErr != nil {
+		return map[string]any{
+			"_parse_error": parseErr.Error(),
+			"_raw":         RedactString(truncate(string(raw), errBodyTruncate)),
+		}, resp.StatusCode, nil
 	}
 	return Redact(parsed), resp.StatusCode, nil
 }

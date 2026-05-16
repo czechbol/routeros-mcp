@@ -92,6 +92,43 @@ func TestDoBasicAuthAndContentType(t *testing.T) {
 	}
 }
 
+func TestDoRejectsInjectedQuery(t *testing.T) {
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("upstream must not be hit on injected path")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	cases := []string{
+		"ip/address?.proplist=password",
+		"ip/address#frag",
+		`ip\address`,
+		"ip/../etc",
+		"ip/address with space",
+		"",
+		"/",
+	}
+	for _, p := range cases {
+		_, _, err := c.Do(context.Background(), "GET", p, nil, nil)
+		if !errors.Is(err, ErrInvalidPath) {
+			t.Fatalf("path %q: got err=%v, want ErrInvalidPath", p, err)
+		}
+	}
+}
+
+func TestDoAcceptsRouterOSIDSegment(t *testing.T) {
+	var gotURL string
+	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURL = r.URL.String()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	_, _, err := c.Do(context.Background(), "PATCH", "ip/address/*A", nil, map[string]string{"x": "y"})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !strings.Contains(gotURL, "/rest/ip/address/*A") {
+		t.Fatalf("URL: got %q, want segment '/rest/ip/address/*A'", gotURL)
+	}
+}
+
 func TestDoBuildURLAppendsQuery(t *testing.T) {
 	var gotURL string
 	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

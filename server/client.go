@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -26,6 +27,17 @@ const (
 // ErrUpstream signals a non-2xx response from the RouterOS REST API. Callers
 // can errors.Is against it; the wrapped text carries the upstream body.
 var ErrUpstream = errors.New("upstream RouterOS REST error")
+
+// ErrInvalidPath signals a caller-supplied REST path with characters outside
+// the RouterOS menu/ID grammar — most importantly `?` or `#`, which would
+// bleed into URL query/fragment via url.Parse and let callers smuggle
+// arbitrary query parameters to the router.
+var ErrInvalidPath = errors.New("invalid REST path")
+
+// validPathSegment is the per-segment character class for RouterOS REST.
+// Menu names are [A-Za-z0-9_-]+; `.` appears in command suffixes like
+// `.proplist` (not in paths but harmless); IDs look like `*A`, `*1C`.
+var validPathSegment = regexp.MustCompile(`^[A-Za-z0-9._*-]+$`)
 
 // Config holds the credentials and connection knobs for the RouterOS client.
 type Config struct {
@@ -114,15 +126,24 @@ func (c *Client) Do(
 	return Redact(parsed), resp.StatusCode, nil
 }
 
-// buildURL combines BaseURL + /rest/ + path and applies the query map.
+// buildURL combines BaseURL + /rest/ + path and applies the query map. The
+// path is validated against validPathSegment (per `/`-split segment) so that
+// neither `?`/`#` (URL-meaningful) nor any other RouterOS-illegal character
+// can slip through to url.Parse and become an injected query/fragment.
 func (c *Client) buildURL(restPath string, query map[string]string) (string, error) {
+	clean := strings.Trim(restPath, "/")
+	if clean == "" {
+		return "", fmt.Errorf("%w: empty path", ErrInvalidPath)
+	}
+	for seg := range strings.SplitSeq(clean, "/") {
+		if seg == "." || seg == ".." || !validPathSegment.MatchString(seg) {
+			return "", fmt.Errorf("%w: %q", ErrInvalidPath, restPath)
+		}
+	}
 	base := strings.TrimRight(c.cfg.BaseURL, "/")
-	clean := strings.TrimLeft(restPath, "/")
-	// Allow callers to pass either "ip/address" or "/ip/address".
-	full := base + "/rest/" + clean
-	u, err := url.Parse(full)
+	u, err := url.Parse(base + "/rest/" + clean)
 	if err != nil {
-		return "", fmt.Errorf("bad path %q: %w", restPath, err)
+		return "", fmt.Errorf("bad base URL %q: %w", base, err)
 	}
 	if len(query) > 0 {
 		q := u.Query()

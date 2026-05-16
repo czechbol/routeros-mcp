@@ -10,16 +10,15 @@ import (
 	"testing"
 )
 
-func newTestClient(t *testing.T, h http.Handler) (*Client, *httptest.Server) {
+func newTestClient(t *testing.T, h http.Handler) *Client {
 	t.Helper()
 	ts := httptest.NewServer(h)
 	t.Cleanup(ts.Close)
-	c := NewClient(Config{BaseURL: ts.URL, Username: "u", Password: "p"})
-	return c, ts
+	return NewClient(Config{BaseURL: ts.URL, Username: "u", Password: "p"})
 }
 
 func TestDoRedactsErrorBody(t *testing.T) {
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"password":"secret","detail":"bad"}`))
 	}))
@@ -43,7 +42,7 @@ func TestDoRedactsErrorBody(t *testing.T) {
 }
 
 func TestDoScrubsPlaintextErrorBody(t *testing.T) {
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte("login failed for password=hunter2 user=foo"))
@@ -61,7 +60,7 @@ func TestDoScrubsPlaintextErrorBody(t *testing.T) {
 }
 
 func TestDoSurfacesParseErrorOnMalformedSuccess(t *testing.T) {
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"password":"hunter2"`)) // unterminated
 	}))
@@ -87,7 +86,7 @@ func TestDoSurfacesParseErrorOnMalformedSuccess(t *testing.T) {
 
 func TestDoBodyTruncation(t *testing.T) {
 	body := strings.Repeat("x", 1024)
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(body))
 	}))
@@ -98,7 +97,7 @@ func TestDoBodyTruncation(t *testing.T) {
 }
 
 func TestDoEmptyBody(t *testing.T) {
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	raw, status, err := c.Do(context.Background(), "GET", "x", nil, nil)
@@ -110,7 +109,7 @@ func TestDoEmptyBody(t *testing.T) {
 func TestDoBasicAuthAndContentType(t *testing.T) {
 	var gotAuth, gotCT, gotAccept string
 	var gotBody []byte
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotCT = r.Header.Get("Content-Type")
 		gotAccept = r.Header.Get("Accept")
@@ -136,9 +135,8 @@ func TestDoBasicAuthAndContentType(t *testing.T) {
 }
 
 func TestDoRejectsInjectedQuery(t *testing.T) {
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Fatal("upstream must not be hit on injected path")
-		_, _ = w.Write([]byte(`{}`))
 	}))
 	cases := []string{
 		"ip/address?.proplist=password",
@@ -159,7 +157,7 @@ func TestDoRejectsInjectedQuery(t *testing.T) {
 
 func TestDoAcceptsRouterOSIDSegment(t *testing.T) {
 	var gotURL string
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotURL = r.URL.String()
 		_, _ = w.Write([]byte(`{}`))
 	}))
@@ -174,7 +172,7 @@ func TestDoAcceptsRouterOSIDSegment(t *testing.T) {
 
 func TestDoBuildURLAppendsQuery(t *testing.T) {
 	var gotURL string
-	c, _ := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotURL = r.URL.String()
 		_, _ = w.Write([]byte(`[]`))
 	}))

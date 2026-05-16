@@ -65,11 +65,13 @@ type LiveSpec struct {
 // operations object at paths[normalised]. Returns ErrPathNotInCatalogue if
 // the key is absent. Callers should check PathKeys for a cheap membership
 // test before calling this.
+//
+//nolint:cyclop // streaming JSON walk has many short error branches that read more clearly inline than as helpers
 func (s *LiveSpec) LookupPath(normalised string) (json.RawMessage, error) {
 	if s == nil || s.CachePath == "" {
 		return nil, fmt.Errorf("%w: no cached spec", ErrPathNotInCatalogue)
 	}
-	f, err := os.Open(s.CachePath) //nolint:gosec // cache path resolved from env / user home
+	f, err := os.Open(s.CachePath)
 	if err != nil {
 		return nil, fmt.Errorf("open cached spec: %w", err)
 	}
@@ -269,7 +271,7 @@ func fetchSpec(ctx context.Context, version string) (*LiveSpec, []byte, error) {
 		if d, err := time.ParseDuration(v); err == nil {
 			timeout = d
 		} else {
-			log.Printf("invalid OPENAPI_FETCH_TIMEOUT=%q, using default %s: %v", v, timeout, err)
+			log.Printf("invalid OPENAPI_FETCH_TIMEOUT (env), using default %s: %v", timeout, err)
 		}
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)

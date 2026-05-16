@@ -113,9 +113,9 @@ func TestLookupOperations_LiveLookupErrorPropagates(t *testing.T) {
 	})
 	t.Cleanup(func() { SetLiveSpec(nil) })
 
-	_, _, _, err := lookupOperations("/ip/address")
+	ops, _, _, err := lookupOperations("/ip/address")
 	if err == nil {
-		t.Fatalf("expected error, got nil")
+		t.Fatalf("expected error, got ops=%v", ops)
 	}
 }
 

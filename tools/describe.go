@@ -199,6 +199,7 @@ func RegisterDescribeTool(srv *mcp.Server) {
 	}, describe)
 }
 
+//nolint:cyclop // sequential validation + op-filtering branches are easier to read inline
 func describe(
 	_ context.Context, _ *mcp.CallToolRequest, in DescribeIn,
 ) (*mcp.CallToolResult, DescribeOut, error) {

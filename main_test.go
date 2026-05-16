@@ -32,7 +32,7 @@ func TestAuthGuard(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := authGuard(okHandler(), tc.token, tc.allowAnon)
-			req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/mcp", nil)
 			if tc.authHeader != "" {
 				req.Header.Set("Authorization", tc.authHeader)
 			}
@@ -67,7 +67,7 @@ func TestOriginGuard(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			h := originGuard(okHandler(), tc.allowed)
-			req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/mcp", nil)
 			if tc.origin != "" {
 				req.Header.Set("Origin", tc.origin)
 			}

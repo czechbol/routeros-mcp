@@ -33,11 +33,11 @@ var defaultRedactFields = []string{
 }
 
 var (
-	redactInit       sync.Once
-	redactMu         sync.RWMutex
-	redactSet        map[string]struct{}
-	redactStringPat  *regexp.Regexp
-	redactOn         bool
+	redactInit      sync.Once
+	redactMu        sync.RWMutex
+	redactSet       map[string]struct{}
+	redactStringPat *regexp.Regexp
+	redactOn        bool
 )
 
 // resetRedactor reloads configuration from the environment. Test-only;

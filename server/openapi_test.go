@@ -25,7 +25,7 @@ func TestFetchSpecWithRetry_404Terminal(t *testing.T) {
 	// retry loop calls — and the retry loop also short-circuits on
 	// ErrSpecNotPublished. Verify fetchSpec returns the sentinel.
 	url := ts.URL + "/openapi.json"
-	_, _, err := fetchSpecAt(context.Background(), url, "7.99.0")
+	err := fetchSpecAt(context.Background(), url, "7.99.0")
 	if !errors.Is(err, ErrSpecNotPublished) {
 		t.Fatalf("want ErrSpecNotPublished, got %v", err)
 	}
@@ -45,7 +45,7 @@ func TestFetchSpecWithRetry_500Retries(t *testing.T) {
 	// Manually emulate retry: fetchSpec on 500 returns errFetchStatus (not
 	// terminal), so calling 3x is the contract pinned by fetchRetryAttempts.
 	for i := range fetchRetryAttempts {
-		_, _, err := fetchSpecAt(context.Background(), url, "7.99.0")
+		err := fetchSpecAt(context.Background(), url, "7.99.0")
 		if !errors.Is(err, errFetchStatus) {
 			t.Fatalf("attempt %d: want errFetchStatus, got %v", i+1, err)
 		}
@@ -55,6 +55,7 @@ func TestFetchSpecWithRetry_500Retries(t *testing.T) {
 	}
 }
 
+//nolint:cyclop // table-driven test; each case adds one branch
 func TestParseSpec(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -224,22 +225,23 @@ func TestWriteCachedSpec_UnwritableDir(t *testing.T) {
 
 // fetchSpecAt is a test seam mirroring fetchSpec but with the URL chosen by
 // the caller, so we can point at httptest without monkey-patching the
-// openapiURLTemplate constant.
-func fetchSpecAt(ctx context.Context, url, version string) (*LiveSpec, []byte, error) {
+// openapiURLTemplate constant. Returns only the terminal error class so
+// retry-loop tests can pin behaviour without exposing payload internals.
+func fetchSpecAt(ctx context.Context, url, version string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("build fetch req: %w", err)
+		return fmt.Errorf("build fetch req: %w", err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("fetch %s: %w", url, err)
+		return fmt.Errorf("fetch %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, nil, fmt.Errorf("%w: %s", ErrSpecNotPublished, version)
+		return fmt.Errorf("%w: %s", ErrSpecNotPublished, version)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("%w: %s status %d", errFetchStatus, url, resp.StatusCode)
+		return fmt.Errorf("%w: %s status %d", errFetchStatus, url, resp.StatusCode)
 	}
 	buf := make([]byte, 0)
 	tmp := make([]byte, 4096)
@@ -250,9 +252,8 @@ func fetchSpecAt(ctx context.Context, url, version string) (*LiveSpec, []byte, e
 			break
 		}
 	}
-	spec, perr := parseSpec(buf, version)
-	if perr != nil {
-		return nil, nil, perr
+	if _, perr := parseSpec(buf, version); perr != nil {
+		return perr
 	}
-	return spec, buf, nil
+	return nil
 }

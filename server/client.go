@@ -110,27 +110,35 @@ func (c *Client) Do(
 	if err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("read body: %w", err)
 	}
+	return interpretResponse(method, restPath, resp.StatusCode, raw)
+}
 
+// interpretResponse maps the raw HTTP body + status into the (value, status,
+// error) shape callers expect. Redaction applies on both the structured
+// return path and the error string so error bodies and JSON-decode-failure
+// fallbacks never leak credentials.
+func interpretResponse(method, restPath string, status int, raw []byte) (any, int, error) {
 	parsed, parseErr := rawToAny(raw)
 	if parseErr != nil {
 		log.Printf("upstream %s /rest/%s: JSON parse failed: %v", method, restPath, parseErr)
 	}
-	if resp.StatusCode >= httpErrorBoundary {
+	if status >= httpErrorBoundary {
 		safeBody := truncate(RedactString(string(raw)), errBodyTruncate)
-		return Redact(parsed), resp.StatusCode, fmt.Errorf(
-			"%w: status %d: %s", ErrUpstream, resp.StatusCode, safeBody,
+		return Redact(parsed), status, fmt.Errorf(
+			"%w: status %d: %s", ErrUpstream, status, safeBody,
 		)
 	}
 	if len(raw) == 0 {
-		return nil, resp.StatusCode, nil
+		return nil, status, nil
 	}
 	if parseErr != nil {
+		//nolint:nilerr // surfaced as a structured field, not as a Go-level error, so callers see the parse failure without forcing a tool-error path
 		return map[string]any{
 			"_parse_error": parseErr.Error(),
 			"_raw":         RedactString(truncate(string(raw), errBodyTruncate)),
-		}, resp.StatusCode, nil
+		}, status, nil
 	}
-	return Redact(parsed), resp.StatusCode, nil
+	return Redact(parsed), status, nil
 }
 
 // buildURL combines BaseURL + /rest/ + path and applies the query map. The

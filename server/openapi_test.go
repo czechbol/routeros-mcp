@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -124,6 +125,101 @@ func TestResolveCacheDir(t *testing.T) {
 			t.Fatalf("got %q, want %q", got, want)
 		}
 	})
+}
+
+func TestLiveSpecLookupPath(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "spec.json")
+	body := `{
+		"openapi":"3.0.0",
+		"info":{"version":"7.99.0"},
+		"components":{"foo":"bar"},
+		"paths":{
+			"/a":{"get":{"summary":"a"}},
+			"/b/c":{"put":{"operationId":"bc"}}
+		}
+	}`
+	if err := writeCachedSpec(dir, p, []byte(body)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	spec := &LiveSpec{CachePath: p}
+
+	raw, err := spec.LookupPath("/b/c")
+	if err != nil {
+		t.Fatalf("lookup hit: %v", err)
+	}
+	if !strings.Contains(string(raw), `"bc"`) {
+		t.Fatalf("raw missing op: %s", raw)
+	}
+
+	if _, err := spec.LookupPath("/missing"); !errors.Is(err, ErrPathNotInCatalogue) {
+		t.Fatalf("miss: want ErrPathNotInCatalogue, got %v", err)
+	}
+
+	empty := &LiveSpec{}
+	if _, err := empty.LookupPath("/a"); !errors.Is(err, ErrPathNotInCatalogue) {
+		t.Fatalf("no cache path: want ErrPathNotInCatalogue, got %v", err)
+	}
+}
+
+func TestLiveSpecLookupPath_NoPathsKey(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "spec.json")
+	body := `{"openapi":"3.0.0","info":{"version":"7.99.0"}}`
+	if err := writeCachedSpec(dir, p, []byte(body)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	spec := &LiveSpec{CachePath: p}
+	if _, err := spec.LookupPath("/a"); !errors.Is(err, ErrPathNotInCatalogue) {
+		t.Fatalf("want ErrPathNotInCatalogue, got %v", err)
+	}
+}
+
+func TestLiveSpecLookupPath_Malformed(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "spec.json")
+	// Truncated JSON: enters paths object then EOF mid-value. Must NOT be
+	// reported as ErrPathNotInCatalogue — that would let callers silently
+	// fall back to embedded shards on a corrupt cache.
+	body := `{"openapi":"3.0.0","info":{"version":"7.99.0"},"paths":{"/a":{"get":`
+	if err := writeCachedSpec(dir, p, []byte(body)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	spec := &LiveSpec{CachePath: p}
+	_, err := spec.LookupPath("/a")
+	if err == nil {
+		t.Fatalf("want error on malformed cache, got nil")
+	}
+	if errors.Is(err, ErrPathNotInCatalogue) {
+		t.Fatalf("malformed cache must not be reported as missing path: %v", err)
+	}
+}
+
+func TestLiveSpecLookupPath_OpenError(t *testing.T) {
+	spec := &LiveSpec{CachePath: "/nonexistent/openapi.json"}
+	_, err := spec.LookupPath("/a")
+	if err == nil {
+		t.Fatalf("want error, got nil")
+	}
+	if errors.Is(err, ErrPathNotInCatalogue) {
+		t.Fatalf("open failure must not be reported as missing path: %v", err)
+	}
+}
+
+func TestWriteCachedSpec_UnwritableDir(t *testing.T) {
+	// ResolveLiveSpec now surfaces cache-write failure as ErrOpenAPIUnavailable
+	// rather than silently logging. Pin the underlying write error so the
+	// wrap path stays exercised.
+	parent := t.TempDir()
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+	dir := filepath.Join(parent, "child")
+	path := filepath.Join(dir, "openapi.json")
+	if err := writeCachedSpec(dir, path, []byte(`{}`)); err == nil {
+		t.Fatalf("want write error on unwritable parent, got nil")
+	}
 }
 
 // fetchSpecAt is a test seam mirroring fetchSpec but with the URL chosen by

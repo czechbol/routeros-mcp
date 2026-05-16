@@ -48,13 +48,73 @@ var (
 	errFetchStatus        = errors.New("fetch non-200")
 )
 
-// LiveSpec is the decoded OpenAPI document fetched at startup, plus metadata
-// describing how it was obtained.
+// LiveSpec describes a RouterOS OpenAPI document held on disk. Only the path
+// key set is kept in memory; operation bodies are streamed from CachePath on
+// demand via LookupPath. This keeps idle memory low for a spec that is ~13 MB
+// raw JSON and would otherwise inflate to many tens of MiB once decoded into a
+// generic any-tree.
 type LiveSpec struct {
 	SpecVersion string
 	OpenAPI     string
-	Source      string // "live", "cache", or "disabled"
-	Paths       map[string]map[string]any
+	Source      string // "live", "cache", "live-mismatched"
+	CachePath   string
+	PathKeys    map[string]struct{}
+}
+
+// LookupPath streams the cached spec file and returns the raw JSON for the
+// operations object at paths[normalised]. Returns ErrPathNotInCatalogue if
+// the key is absent. Callers should check PathKeys for a cheap membership
+// test before calling this.
+func (s *LiveSpec) LookupPath(normalised string) (json.RawMessage, error) {
+	if s == nil || s.CachePath == "" {
+		return nil, fmt.Errorf("%w: no cached spec", ErrPathNotInCatalogue)
+	}
+	f, err := os.Open(s.CachePath) //nolint:gosec // cache path resolved from env / user home
+	if err != nil {
+		return nil, fmt.Errorf("open cached spec: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	dec := json.NewDecoder(f)
+	if _, err := dec.Token(); err != nil {
+		return nil, fmt.Errorf("decode cached spec: %w", err)
+	}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil, fmt.Errorf("decode cached spec: %w", err)
+		}
+		key, _ := tok.(string)
+		if key != "paths" {
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return nil, fmt.Errorf("skip %q: %w", key, err)
+			}
+			continue
+		}
+		if _, err := dec.Token(); err != nil {
+			return nil, fmt.Errorf("enter paths: %w", err)
+		}
+		for dec.More() {
+			ktok, err := dec.Token()
+			if err != nil {
+				return nil, fmt.Errorf("read path key: %w", err)
+			}
+			pathKey, _ := ktok.(string)
+			if pathKey == normalised {
+				var raw json.RawMessage
+				if err := dec.Decode(&raw); err != nil {
+					return nil, fmt.Errorf("decode path %q: %w", pathKey, err)
+				}
+				return raw, nil
+			}
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return nil, fmt.Errorf("skip path %q: %w", pathKey, err)
+			}
+		}
+		return nil, fmt.Errorf("%w: %q", ErrPathNotInCatalogue, normalised)
+	}
+	return nil, fmt.Errorf("%w: %q (no paths object)", ErrPathNotInCatalogue, normalised)
 }
 
 // ResolveLiveSpec inspects RouterOS for its version, looks for a cached copy
@@ -76,6 +136,7 @@ func ResolveLiveSpec(ctx context.Context, c *Client) (*LiveSpec, error) {
 
 	if spec, cacheErr := readCachedSpec(cachePath, version); cacheErr == nil {
 		spec.Source = "cache"
+		spec.CachePath = cachePath
 		return spec, nil
 	}
 
@@ -88,7 +149,9 @@ func ResolveLiveSpec(ctx context.Context, c *Client) (*LiveSpec, error) {
 	}
 	if err := writeCachedSpec(cacheDir, cachePath, raw); err != nil {
 		log.Printf("openapi cache write failed (%s): %v", cachePath, err)
+		return nil, fmt.Errorf("%w: cache write: %w", ErrOpenAPIUnavailable, err)
 	}
+	spec.CachePath = cachePath
 	return spec, nil
 }
 
@@ -187,9 +250,9 @@ func resolveCacheDir() string {
 }
 
 type rawOpenAPI struct {
-	OpenAPI string                    `json:"openapi"`
-	Info    struct{ Version string }  `json:"info"`
-	Paths   map[string]map[string]any `json:"paths"`
+	OpenAPI string                     `json:"openapi"`
+	Info    struct{ Version string }   `json:"info"`
+	Paths   map[string]json.RawMessage `json:"paths"`
 }
 
 func readCachedSpec(path, wantVersion string) (*LiveSpec, error) {
@@ -248,10 +311,14 @@ func parseSpec(buf []byte, wantVersion string) (*LiveSpec, error) {
 	if raw.Info.Version == "" {
 		return nil, errSpecMissingVersion
 	}
+	keys := make(map[string]struct{}, len(raw.Paths))
+	for k := range raw.Paths {
+		keys[k] = struct{}{}
+	}
 	out := &LiveSpec{
 		SpecVersion: raw.Info.Version,
 		OpenAPI:     raw.OpenAPI,
-		Paths:       raw.Paths,
+		PathKeys:    keys,
 	}
 	if wantVersion != "" && raw.Info.Version != wantVersion {
 		log.Printf(

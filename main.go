@@ -118,7 +118,7 @@ func loadLiveSpec(c *server.Client) {
 	case err == nil:
 		tools.SetLiveSpec(spec)
 		log.Printf(
-			"openapi source: %s (RouterOS %s, %d paths)", spec.Source, spec.SpecVersion, len(spec.Paths),
+			"openapi source: %s (RouterOS %s, %d paths)", spec.Source, spec.SpecVersion, len(spec.PathKeys),
 		)
 	case errors.Is(err, server.ErrSpecNotPublished):
 		log.Printf("openapi source: embedded 7.22.3 (no upstream spec published for this RouterOS version)")

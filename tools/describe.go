@@ -85,12 +85,14 @@ func loadEmbeddedIndex() (openapiIndex, error) {
 	return embeddedIndex, errEmbeddedIndex
 }
 
-// lookupOperations returns the operation map for normalised (a leading-slash
-// RouterOS path) using the live spec if present, otherwise the embedded shards.
 func lookupOperations(normalised string) (map[string]operationDoc, string, error) {
 	if live := activeLiveSpec(); live != nil {
-		if rawOps, ok := live.Paths[normalised]; ok {
-			ops, err := decodeLiveOps(rawOps)
+		if _, ok := live.PathKeys[normalised]; ok {
+			raw, err := live.LookupPath(normalised)
+			if err != nil {
+				return nil, live.SpecVersion, fmt.Errorf("live spec lookup %q: %w", normalised, err)
+			}
+			ops, err := decodeLiveOps(raw)
 			if err != nil {
 				return nil, live.SpecVersion, err
 			}
@@ -118,18 +120,10 @@ func lookupOperations(normalised string) (map[string]operationDoc, string, error
 	return ops, idx.SpecVersion, nil
 }
 
-func decodeLiveOps(rawOps map[string]any) (map[string]operationDoc, error) {
-	out := make(map[string]operationDoc, len(rawOps))
-	for method, raw := range rawOps {
-		buf, err := json.Marshal(raw)
-		if err != nil {
-			return nil, fmt.Errorf("re-encode live op %s: %w", method, err)
-		}
-		var op operationDoc
-		if err := json.Unmarshal(buf, &op); err != nil {
-			return nil, fmt.Errorf("decode live op %s: %w", method, err)
-		}
-		out[method] = op
+func decodeLiveOps(raw json.RawMessage) (map[string]operationDoc, error) {
+	var out map[string]operationDoc
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("decode live ops: %w", err)
 	}
 	return out, nil
 }

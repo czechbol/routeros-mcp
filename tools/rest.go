@@ -4,7 +4,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -70,11 +69,12 @@ type RemoveIn struct {
 // ExecIn parameters for ros_exec (POST /rest/<path>/<command>).
 // Use this for commands that aren't add/set/remove: monitor, ping, reboot,
 // scheduler/run, system/reboot, etc. Also for /print with a filter body.
+// Destructive-action confirmation is delegated to the MCP client via the
+// DestructiveHint annotation; the server does not gate calls itself.
 type ExecIn struct {
-	Path           string         `json:"path"                                jsonschema:"full action path including command, e.g. system/reboot, interface/wireguard/peers/print, ping"`
-	Body           map[string]any `json:"body,omitempty"                      jsonschema:"JSON body forwarded as the action's arguments"`
-	Format         string         `json:"format,omitempty"                    jsonschema:"response format: json or markdown (default json)"`
-	AckDestructive bool           `json:"acknowledged_destructive,omitempty"  jsonschema:"set true to acknowledge a destructive command (reboot, reset-configuration, etc.)"`
+	Path   string         `json:"path"            jsonschema:"full action path including command, e.g. system/reboot, interface/wireguard/peers/print, ping"`
+	Body   map[string]any `json:"body,omitempty"  jsonschema:"JSON body forwarded as the action's arguments"`
+	Format string         `json:"format,omitempty" jsonschema:"response format: json or markdown (default json)"`
 }
 
 // RegisterRESTTools wires the five generic REST tools onto srv.
@@ -219,11 +219,6 @@ func execHandler(c *server.Client) mutateFnExec {
 		if in.Path == "" {
 			return server.ToolError("path is required; example: system/reboot or ping"), MutateOut{}, nil
 		}
-		if isDestructive(in.Path) && !in.AckDestructive {
-			return server.ToolError(
-				"path %q looks destructive; pass acknowledged_destructive=true to confirm", in.Path,
-			), MutateOut{}, nil
-		}
 		if in.Format == "" {
 			in.Format = formatJSON
 		}
@@ -312,16 +307,6 @@ func clamp(n, def, lo, hi int) int {
 }
 
 func ptr[T any](v T) *T { return &v }
-
-func isDestructive(path string) bool {
-	destructive := []string{"reboot", "reset-configuration", "shutdown", "factory-reset"}
-	for seg := range strings.SplitSeq(path, "/") {
-		if slices.Contains(destructive, seg) {
-			return true
-		}
-	}
-	return false
-}
 
 func renderItems(path string, out PrintOut) string {
 	var b strings.Builder

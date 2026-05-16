@@ -63,6 +63,12 @@ patterns, gotchas: see [docs/contributing.md](docs/contributing.md).
 
 - Bearer-token auth on `/mcp` is required by default; opt out with
   `MCP_ALLOW_ANON=1` only on a trusted segment.
+- Destructive actions (`ros_exec`, `ros_remove`) carry MCP
+  `DestructiveHint: true` and rely on the client to prompt the user for
+  confirmation. The server does not gate calls server-side — a meaningful
+  RouterOS denylist is impractical, and a narrow keyword check would
+  give false confidence. Run with a bearer token and review what your
+  client surfaces before approval.
 - RouterOS responses are walked and known sensitive fields are masked
   before reaching the LLM. Toggle with `REDACT=0`; extend with
   `REDACT_EXTRA`.

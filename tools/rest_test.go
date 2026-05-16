@@ -54,38 +54,7 @@ func TestPaginate(t *testing.T) {
 	}
 }
 
-func TestIsDestructive(t *testing.T) {
-	cases := map[string]bool{
-		"system/reboot":                    true,
-		"system/reset-configuration":       true,
-		"system/shutdown":                  true,
-		"system/routerboard/factory-reset": true,
-		"ping":                             false,
-		"pre-rebooted-state":               false, // regression for segment-match fix
-		"interface/wireguard/peers":        false,
-		"":                                 false,
-		"System/Reboot":                    false, // case-sensitive — pin current
-	}
-	for path, want := range cases {
-		if got := isDestructive(path); got != want {
-			t.Errorf("isDestructive(%q) = %v, want %v", path, got, want)
-		}
-	}
-}
-
-func TestExecHandlerGatesDestructive(t *testing.T) {
-	c := server.NewClient(server.Config{BaseURL: "http://invalid", Username: "u", Password: "p"})
-	fn := execHandler(c)
-	res, _, err := fn(context.Background(), nil, ExecIn{Path: "system/reboot"})
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if res == nil || !res.IsError {
-		t.Fatalf("expected ToolError for unack reboot, got %#v", res)
-	}
-}
-
-func TestExecHandlerAcksAndCalls(t *testing.T) {
+func TestExecHandlerCallsUpstream(t *testing.T) {
 	var hits int
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -97,7 +66,7 @@ func TestExecHandlerAcksAndCalls(t *testing.T) {
 	defer ts.Close()
 	c := server.NewClient(server.Config{BaseURL: ts.URL, Username: "u", Password: "p"})
 	fn := execHandler(c)
-	_, _, err := fn(context.Background(), nil, ExecIn{Path: "system/reboot", AckDestructive: true})
+	_, _, err := fn(context.Background(), nil, ExecIn{Path: "system/reboot"})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}

@@ -54,9 +54,9 @@ reason. `nolintlint` will reject unused suppressions.
 
 A commit-msg hook enforces:
 
-* `<type>(<scope>?): <description>` — single subject line, no body.
-* `feat | fix | docs | style | refactor | test | chore | perf | ci | build | revert`
-* Bodies are rejected unless the commit is a `BREAKING CHANGE:` (footer
+- `<type>(<scope>?): <description>` — single subject line, no body.
+- `feat | fix | docs | style | refactor | test | chore | perf | ci | build | revert`
+- Bodies are rejected unless the commit is a `BREAKING CHANGE:` (footer
   trailer is allowed).
 
 So: `feat: redact secrets in RouterOS responses by default` ✔.
@@ -92,28 +92,28 @@ func RegisterDoThing(srv *mcp.Server, c *server.Client) {
 
 Rules of thumb:
 
-* **Every input field needs `jsonschema:"…"`.** That text is what the
+- **Every input field needs `jsonschema:"…"`.** That text is what the
   agent reads when deciding how to call the tool. Skipping it leaves
   the field nameless in the schema and the agent has to guess.
-* **`ToolAnnotations` field types are inconsistent.** `ReadOnlyHint`
+- **`ToolAnnotations` field types are inconsistent.** `ReadOnlyHint`
   and `IdempotentHint` are plain `bool`; `DestructiveHint` and
   `OpenWorldHint` are `*bool`. Use the local `ptr()` helper.
-* **Output structs must use concrete types.** Claude Code's schema
+- **Output structs must use concrete types.** Claude Code's schema
   validator rejects bare `any` fields in the generated `outputSchema`.
   Use `map[string]any` (or stricter) instead. See the `toMap` helper
   in `tools/rest.go` for the standard conversion.
-* **Defaults belong in the handler**, not the schema. Set
+- **Defaults belong in the handler**, not the schema. Set
   `if in.Format == "" { in.Format = formatMarkdown }`.
-* Wire the registration in `main.go` next to `tools.RegisterRESTTools`.
+- Wire the registration in `main.go` next to `tools.RegisterRESTTools`.
 
 ## Errors
 
 Two levels:
 
-* **Tool-level errors** (bad input, RouterOS 4xx/5xx, missing path):
+- **Tool-level errors** (bad input, RouterOS 4xx/5xx, missing path):
   return `*mcp.CallToolResult{IsError: true}` via `server.ToolError(…)`
   and `nil` Go error. The agent sees the message and recovers.
-* **Protocol/transport errors** (the SDK or HTTP machinery itself):
+- **Protocol/transport errors** (the SDK or HTTP machinery itself):
   return a non-nil Go error.
 
 Every dynamic `fmt.Errorf` must wrap a sentinel (`err113`). Add new
@@ -166,9 +166,9 @@ because gosec rejects 0644 — keep it that way.
 Unit tests live next to the code they cover. `mage test` runs
 `go test -race -cover ./...`. We aim for tests on:
 
-* Anything that touches secret material (`server/redact_test.go`).
-* Pure functions in the request path (`tools/rest_test.go`).
-* New error code paths.
+- Anything that touches secret material (`server/redact_test.go`).
+- Pure functions in the request path (`tools/rest_test.go`).
+- New error code paths.
 
 The `golangci.yml` exclusion list relaxes `bodyclose, err113,
 forcetypeassert, gosec, revive:add-constant` for `_test.go`. Use that
@@ -185,31 +185,22 @@ size with `ls -lh dist/routeros-mcp` — embedded shards already cost ~5.8 MB.
 
 ## Gotchas worth knowing
 
-* **mage doc-comment backticks.** Mage embeds the package-level doc
-  comment of `magefile.go` into a Go raw-string literal. Any backticks
-  in that comment terminate the string early and you get
-  `syntax error: unexpected name mage in argument list`. Use double
-  quotes in that one specific doc comment.
-* **RouterOS env list field.** The RouterOS CLI uses `list=<env-list>`,
-  not `name=`. Some MCP wrappers expose it as `name=` and silently
-  fail. If you script container env management, use the CLI directly
-  or verify by re-reading `/container/envs/print`.
-* **Container env propagation race.** A container created **before**
+- **Container env propagation race.** A container created **before**
   its env list is populated will boot without those vars. Order:
   create env list → add keys → create container → start.
-* **Container boot race vs. bridge.** `/container/start` can return
+- **Container boot race vs. bridge.** `/container/start` can return
   before the veth has carrier. The live-spec loader retries
   (8 attempts, exponential 1-8 s) for this reason — don't shorten
   the back-off without re-testing on a slow router.
-* **Container needs DNS.** RouterOS containers default to whatever DNS
+- **Container needs DNS.** RouterOS containers default to whatever DNS
   the image was built with (none, here). Pass `dns=…` at
   `/container/add` time. The user guide covers this in §8.6.
-* **golangci-lint Go-version pin.** golangci-lint refuses to lint code
+- **golangci-lint Go-version pin.** golangci-lint refuses to lint code
   targeting a Go version newer than the toolchain it was built with.
   Keep `go.mod`'s `go` directive ≤ the version baked into the pinned
   golangci-lint release; bump both together.
-* **Generic passthrough is intentional.** Don't add typed wrappers for
-  individual RouterOS paths. The whole point of the seven generic
+- **Generic passthrough is intentional.** Don't add typed wrappers for
+  individual RouterOS paths. The whole point of the generic
   tools is that the agent uses `ros_describe` + `ros_list_paths` at
   runtime — adding e.g. `ros_firewall_add` would duplicate the
   catalogue and rot quickly.
@@ -234,12 +225,12 @@ a thin wrapper that authenticates and invokes `mage release`.
 
 `mage release` (env-driven):
 
-| Var | Default | Notes |
-|---|---|---|
-| `REGISTRY` | `ghcr.io` | Registry hostname. |
-| `IMAGE_REPO` | `$GITHUB_REPOSITORY` (required if unset) | `czechbol/routeros-mcp` — lowercased before push. |
-| `VERSION` | `$GITHUB_REF_NAME` (required if unset) | Semver with or without `v` prefix. |
-| `PUSH` | `1` | Set `0` to skip the registry push (then `mage release` is just `mage tarballs`). |
+| Var          | Default                                  | Notes                                                                            |
+| ------------ | ---------------------------------------- | -------------------------------------------------------------------------------- |
+| `REGISTRY`   | `ghcr.io`                                | Registry hostname.                                                               |
+| `IMAGE_REPO` | `$GITHUB_REPOSITORY` (required if unset) | `czechbol/routeros-mcp` — lowercased before push.                                |
+| `VERSION`    | `$GITHUB_REF_NAME` (required if unset)   | Semver with or without `v` prefix.                                               |
+| `PUSH`       | `1`                                      | Set `0` to skip the registry push (then `mage release` is just `mage tarballs`). |
 
 It:
 

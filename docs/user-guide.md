@@ -437,17 +437,33 @@ mount a USB stick for container storage and point `/container/config`'s
 
 - **Always set `MCP_TOKEN`.** Without it, anybody who can reach the
   MCP port can run any RouterOS command. Bearer auth is a hard guard,
-  not advisory.
+  not advisory. The server enforces a 32-character minimum and refuses
+  to start otherwise — generate one with `openssl rand -hex 32`. There
+  is no per-IP rate limit on failed auth, so token entropy is the only
+  barrier against an online brute force from a same-LAN attacker.
 - The container has full REST access via its credentials. Use a
   **dedicated RouterOS user** with the minimum group rights you need
   (don't reuse `admin`).
 - Bind the MCP port to a trusted interface only (default
   `0.0.0.0:8080`; the dst-nat rule restricts this to `in-interface=bridge`
-  if you scope it).
-- Terminate TLS in front (reverse proxy with a real certificate) before
-  exposing `/mcp` to anything more than your LAN. Bearer over HTTP is
-  fine on a trusted segment, not on the open internet.
-- Redaction is on by default. Keep it on.
+  if you scope it). For a colocated MCP client, prefer
+  `LISTEN_ADDR=127.0.0.1:8080`.
+- **The listener speaks plain HTTP — the token rides in clear.** Anyone
+  with passive read on the L2 segment (rogue device on the same VLAN,
+  ARP-poison, span port) can lift it. On a single-user home LAN behind
+  the router itself this is acceptable; on any shared segment or
+  off-LAN exposure, terminate TLS in front (Caddy/nginx with a real
+  certificate) or bind to loopback only.
+- Set `ALLOWED_ORIGINS` whenever the listener is reachable from anything
+  other than `127.0.0.1`. With the allowlist empty there is no
+  defense-in-depth against another process on the same host or LAN that
+  has learned the token.
+- Redaction is on by default. Keep it on. Some RouterOS endpoints
+  encode secrets under generic field names (`/snmp/community` stores
+  the community string under `name`); the redactor carries a per-path
+  override table for those, but **anything you store under a custom
+  field name not on the global allowlist will pass through unredacted**
+  — add it via `REDACT_EXTRA` when needed.
 
 ---
 

@@ -124,7 +124,7 @@ func interpretResponse(method, restPath string, status int, raw []byte) (any, in
 	}
 	if status >= httpErrorBoundary {
 		safeBody := truncate(RedactString(string(raw)), errBodyTruncate)
-		return Redact(parsed), status, fmt.Errorf(
+		return RedactPath(restPath, parsed), status, fmt.Errorf(
 			"%w: status %d: %s", ErrUpstream, status, safeBody,
 		)
 	}
@@ -138,7 +138,7 @@ func interpretResponse(method, restPath string, status int, raw []byte) (any, in
 			"_raw":         RedactString(truncate(string(raw), errBodyTruncate)),
 		}, status, nil
 	}
-	return Redact(parsed), status, nil
+	return RedactPath(restPath, parsed), status, nil
 }
 
 // buildURL combines BaseURL + /rest/ + path and applies the query map. The

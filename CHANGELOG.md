@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-05-18
+
 ### Added
 - Surface spec source (live vs bundled) in `ros_describe` output
 
@@ -18,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Scrub credentials from error bodies and string responses
 - Require `Origin` header when allowlist configured
 - Validate and escape REST path segments
+- Per-path redaction overrides for endpoints that store secrets under
+  generic field names (`/snmp/community` `name`)
+- Enforce 32-character minimum on `MCP_TOKEN` at startup
+- Cap `/mcp` request bodies at 1 MiB and `/healthz` at 8 KiB via
+  `http.MaxBytesReader`
+- Set `ReadTimeout` / `WriteTimeout` / `IdleTimeout` on the HTTP server
+  to close the post-header slowloris window
+- `ros_describe` errors no longer leak the embedded filesystem layout
 
 ## [0.1.0] - 2026-05-16
 

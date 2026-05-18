@@ -97,6 +97,38 @@ func TestRedactString_Disabled(t *testing.T) {
 	}
 }
 
+func TestRedactPath_SnmpCommunityName(t *testing.T) {
+	t.Setenv("REDACT", "")
+	resetRedactor()
+
+	in := map[string]any{
+		".id":         "*0",
+		"name":        "public",
+		"read-access": "true",
+	}
+	got := RedactPath("/snmp/community", in).(map[string]any)
+	if got["name"] != redactionMask {
+		t.Fatalf("snmp/community name not redacted: %#v", got)
+	}
+	if got["read-access"] != "true" {
+		t.Fatalf("non-sensitive field changed: %#v", got)
+	}
+
+	// `name` must NOT be redacted on unrelated paths.
+	in2 := map[string]any{"name": "ether1"}
+	got2 := RedactPath("/interface", in2).(map[string]any)
+	if got2["name"] != "ether1" {
+		t.Fatalf("name redacted on unrelated path: %#v", got2)
+	}
+
+	// Sub-path inherits override.
+	in3 := map[string]any{"name": "private"}
+	got3 := RedactPath("snmp/community/*0", in3).(map[string]any)
+	if got3["name"] != redactionMask {
+		t.Fatalf("sub-path did not inherit override: %#v", got3)
+	}
+}
+
 func TestRedact_Extra(t *testing.T) {
 	t.Setenv("REDACT", "")
 	t.Setenv("REDACT_EXTRA", "comment, custom-field ")

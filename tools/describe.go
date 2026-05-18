@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"sort"
 	"strings"
@@ -141,7 +142,11 @@ func loadShard(menu string) (*openapiShard, error) {
 	name := openapiDir + pathSep + menu + ".json"
 	raw, err := openapiFS.ReadFile(name)
 	if err != nil {
-		return nil, fmt.Errorf("%w %q: %w", ErrShardNotFound, menu, err)
+		// Internal FS path (openapi/<menu>.json) is for operator logs only —
+		// callers see just the menu name so error responses don't echo
+		// embedded filesystem layout back to the MCP client.
+		log.Printf("describe: shard read failed for %q: %v", name, err)
+		return nil, fmt.Errorf("%w %q", ErrShardNotFound, menu)
 	}
 	var s openapiShard
 	if err := json.Unmarshal(raw, &s); err != nil {

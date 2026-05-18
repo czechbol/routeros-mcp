@@ -66,11 +66,23 @@ var defaultRedactFields = []string{
 	"wpa2-pre-shared-key",
 }
 
+// defaultPathSensitiveFields maps a normalised RouterOS REST path prefix to
+// the list of additional field names that hold sensitive values on that
+// menu but cannot be globally allowlisted because the same field name is
+// non-sensitive elsewhere (e.g. `name` is the SNMP community string on
+// /snmp/community but the harmless identifier almost everywhere else).
+// Match is case-insensitive on both path and field name, and applies to
+// any path whose first N segments equal the key.
+var defaultPathSensitiveFields = map[string][]string{
+	"snmp/community": {"name"},
+}
+
 var (
 	redactInit      sync.Once
 	redactMu        sync.RWMutex
 	redactSet       map[string]struct{}
 	redactStringPat *regexp.Regexp
+	redactPathSet   map[string]map[string]struct{}
 	redactOn        bool
 )
 
@@ -82,6 +94,7 @@ func resetRedactor() {
 	redactInit = sync.Once{}
 	redactSet = nil
 	redactStringPat = nil
+	redactPathSet = nil
 	redactOn = false
 }
 
@@ -102,7 +115,41 @@ func initRedactor() {
 			}
 		}
 		redactStringPat = buildRedactStringPattern(redactSet)
+		redactPathSet = make(map[string]map[string]struct{}, len(defaultPathSensitiveFields))
+		for path, fields := range defaultPathSensitiveFields {
+			set := make(map[string]struct{}, len(fields))
+			for _, f := range fields {
+				set[strings.ToLower(f)] = struct{}{}
+			}
+			redactPathSet[normalisePath(path)] = set
+		}
 	})
+}
+
+// normalisePath lowercases and trims a RouterOS REST path so per-path
+// override lookup is direction- and case-insensitive.
+func normalisePath(p string) string {
+	return strings.ToLower(strings.Trim(p, "/"))
+}
+
+// pathSensitiveFields returns the override set for restPath, or nil. A path
+// matches if any registered prefix equals one of its segment prefixes — so
+// `/snmp/community/*0` inherits the `/snmp/community` override.
+func pathSensitiveFields(restPath string) map[string]struct{} {
+	clean := normalisePath(restPath)
+	if clean == "" || len(redactPathSet) == 0 {
+		return nil
+	}
+	for {
+		if set, ok := redactPathSet[clean]; ok {
+			return set
+		}
+		i := strings.LastIndex(clean, "/")
+		if i < 0 {
+			return nil
+		}
+		clean = clean[:i]
+	}
 }
 
 // buildRedactStringPattern compiles a single regex that finds sensitive
@@ -139,40 +186,65 @@ func Redact(v any) any {
 	if !redactOn {
 		return v
 	}
-	return redactValue(v)
+	return redactValue(v, nil)
 }
 
-func redactValue(v any) any {
+// RedactPath is like Redact but additionally masks fields that are only
+// sensitive on restPath (see defaultPathSensitiveFields).
+func RedactPath(restPath string, v any) any {
+	initRedactor()
+	if !redactOn {
+		return v
+	}
+	return redactValue(v, pathSensitiveFields(restPath))
+}
+
+func redactValue(v any, extras map[string]struct{}) any {
 	switch x := v.(type) {
 	case map[string]any:
-		for k, child := range x {
-			if isSensitiveKey(k) {
-				x[k] = redactionMask
-				continue
-			}
-			x[k] = redactValue(child)
-		}
-		return x
+		return redactMap(x, extras)
 	case []any:
 		for i, child := range x {
-			x[i] = redactValue(child)
+			x[i] = redactValue(child, extras)
 		}
 		return x
 	case string:
-		// Free-form strings can carry sensitive keys (RouterOS error
-		// bodies sometimes echo submitted creds in plain text). Try a
-		// JSON decode first so structured payloads stay structured; fall
-		// back to a pattern scrub for everything else.
-		if obj, ok := tryParseJSONString(x); ok {
-			redacted := redactValue(obj)
-			if b, err := json.Marshal(redacted); err == nil {
-				return string(b)
-			}
-		}
-		return redactString(x)
+		return redactStringValue(x, extras)
 	default:
 		return v
 	}
+}
+
+func redactMap(m map[string]any, extras map[string]struct{}) map[string]any {
+	for k, child := range m {
+		if isSensitiveKey(k) || isExtraSensitive(k, extras) {
+			m[k] = redactionMask
+			continue
+		}
+		m[k] = redactValue(child, extras)
+	}
+	return m
+}
+
+// redactStringValue scrubs a free-form string. RouterOS error bodies
+// sometimes echo submitted creds verbatim; try a JSON decode first so
+// structured payloads stay structured, then fall back to pattern scrub.
+func redactStringValue(s string, extras map[string]struct{}) string {
+	if obj, ok := tryParseJSONString(s); ok {
+		redacted := redactValue(obj, extras)
+		if b, err := json.Marshal(redacted); err == nil {
+			return string(b)
+		}
+	}
+	return redactString(s)
+}
+
+func isExtraSensitive(k string, extras map[string]struct{}) bool {
+	if extras == nil {
+		return false
+	}
+	_, ok := extras[strings.ToLower(k)]
+	return ok
 }
 
 func tryParseJSONString(s string) (any, bool) {

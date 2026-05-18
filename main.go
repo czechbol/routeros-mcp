@@ -22,7 +22,13 @@ const (
 	defaultListenAddr        = "0.0.0.0:8080"
 	defaultRouterTimeout     = 30 * time.Second
 	defaultReadHeaderTimeout = 10 * time.Second
+	defaultReadTimeout       = 60 * time.Second
+	defaultWriteTimeout      = 5 * time.Minute
+	defaultIdleTimeout       = 2 * time.Minute
 	liveSpecLoadTimeout      = 90 * time.Second
+	minTokenLength           = 32
+	maxMCPRequestBytes       = 1 << 20 // 1 MiB cap on /mcp request bodies
+	maxHealthRequestBytes    = 8 << 10 // 8 KiB cap on /healthz request bodies
 )
 
 func main() {
@@ -44,6 +50,11 @@ func main() {
 	switch {
 	case mcpToken == "" && !allowAnon:
 		log.Fatal("MCP_TOKEN is required; set MCP_ALLOW_ANON=1 to expose the server unauthenticated")
+	case mcpToken != "" && len(mcpToken) < minTokenLength:
+		log.Fatalf(
+			"MCP_TOKEN must be at least %d characters; generate one with `openssl rand -hex 32`",
+			minTokenLength,
+		)
 	case allowAnon:
 		log.Print("WARNING: MCP_ALLOW_ANON=1 — /mcp is exposed without authentication")
 	}
@@ -64,17 +75,22 @@ func main() {
 	}, nil)
 
 	mux := http.NewServeMux()
-	mux.Handle("/mcp", authGuard(originGuard(handler, allowedOrigins), mcpToken, allowAnon))
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+	mcpHandler := authGuard(originGuard(handler, allowedOrigins), mcpToken, allowAnon)
+	mux.Handle("/mcp", maxBytes(mcpHandler, maxMCPRequestBytes))
+	healthHandler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	mux.Handle("/healthz", maxBytes(healthHandler, maxHealthRequestBytes))
 
 	log.Printf("routeros-mcp listening on %s, target %s", addr, cfg.BaseURL)
 	httpSrv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: defaultReadHeaderTimeout,
+		ReadTimeout:       defaultReadTimeout,
+		WriteTimeout:      defaultWriteTimeout,
+		IdleTimeout:       defaultIdleTimeout,
 	}
 	if err := httpSrv.ListenAndServe(); err != nil {
 		log.Fatal(err)
@@ -127,6 +143,18 @@ func loadLiveSpec(c *server.Client) {
 	default:
 		log.Printf("openapi source: embedded 7.22.3 (unexpected error: %v)", err)
 	}
+}
+
+// maxBytes wraps r.Body in http.MaxBytesReader so an oversized request
+// body trips the SDK decoder with a recoverable error instead of letting
+// the handler allocate unbounded memory.
+func maxBytes(next http.Handler, n int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, n)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // authGuard wraps next with a constant-time bearer-token check. An empty
